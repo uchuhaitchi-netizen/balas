@@ -143,14 +143,14 @@ const DELIVERY_ITEMS: DeliveryItem[] = [
   },
   {
     value: "Weekday",
-    label: "Weekday",
+    label: "WD",
     description: "Sun – Thu",
     color: "bg-sky-100 dark:bg-sky-900/40",
     textColor: "text-sky-700 dark:text-sky-300",
   },
   {
     value: "Weekday 2",
-    label: "Weekday 2",
+    label: "WE",
     description: "Mon – Fri",
     color: "bg-blue-100 dark:bg-blue-900/40",
     textColor: "text-blue-700 dark:text-blue-300",

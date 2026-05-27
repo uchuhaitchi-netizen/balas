@@ -53,13 +53,14 @@ function getInitials(name: string) {
 function SettingRow({ icon, title, description, accentClass, onClick }: {
   icon: React.ReactNode; title: string; description?: string; accentClass: string; onClick: () => void
 }) {
+  const textColor = (accentClass || "").split(" ").find(c => c.startsWith("text-")) ?? "text-muted-foreground"
   return (
     <button
       type="button"
       onClick={onClick}
       className="flex items-center gap-4 px-4 py-3.5 text-left hover:bg-muted/40 active:bg-muted/60 transition-colors w-full"
     >
-      <span className={`flex items-center justify-center size-9 rounded-xl shrink-0 ${accentClass}`}>
+      <span className={`size-6 shrink-0 ${textColor}`}>
         {icon}
       </span>
       <div className="flex-1 min-w-0">
@@ -135,7 +136,7 @@ export function SettingsHub({ onNavigate }: { onNavigate: (page: string) => void
           type="button"
           className="flex items-center gap-4 px-4 py-3.5 text-left hover:bg-muted/40 active:bg-muted/60 transition-colors w-full"
         >
-          <span className="flex items-center justify-center size-9 rounded-xl shrink-0 text-red-400 bg-red-400/10">
+          <span className="size-6 shrink-0 text-red-400">
             <LogOut className="size-5" />
           </span>
           <p className="flex-1 text-[13px] font-medium text-red-400 leading-tight">Log Out</p>

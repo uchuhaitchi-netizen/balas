@@ -121,7 +121,8 @@ function homeFormatKm(km: number): string {
 }
 
 function homeDeliveryLabel(value: string): string {
-  if (value === "Weekday 2") return "Weekday"
+  if (value === "Weekday") return "WD"
+  if (value === "Weekday 2") return "WE"
   if (value === "Weekday 3") return "WA"
   return value
 }
@@ -1326,9 +1327,9 @@ function HomePage({ onNavigate }: { onNavigate: (page: string) => void }) {
                 style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr' }}
               >
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">Day</span>
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">In</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">Out</span>
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">Front</span>
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">Expired</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground text-center">In</span>
               </div>
               <div className="flex flex-col">
                 {DAYS.map((day, i) => {
@@ -1351,9 +1352,9 @@ function HomePage({ onNavigate }: { onNavigate: (page: string) => void }) {
                           <div className="min-w-0 text-center">
                             <p className={`text-[11px] font-semibold truncate ${isToday ? "text-primary" : "text-foreground"}`}>{day.en}</p>
                           </div>
-                          <div className="flex justify-center"><ColorPill color={STOCK_IN_COLORS[i]} size="sm" /></div>
-                          <div className="flex justify-center"><ColorPill color={MOVE_FRONT_COLORS[i]} size="sm" /></div>
                           <div className="flex justify-center"><ColorPill color={EXPIRED_COLORS[i]} size="sm" /></div>
+                          <div className="flex justify-center"><ColorPill color={MOVE_FRONT_COLORS[i]} size="sm" /></div>
+                          <div className="flex justify-center"><ColorPill color={STOCK_IN_COLORS[i]} size="sm" /></div>
                         </div>
                       </div>
                     </div>

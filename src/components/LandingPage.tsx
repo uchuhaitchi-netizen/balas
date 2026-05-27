@@ -94,26 +94,16 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
         {/* Hero Section */}
         <div className="w-full max-w-3xl mx-auto text-center space-y-6 sm:space-y-8">
 
-          {/* Badge */}
-          <div
-            className={`flex justify-center transition-all duration-500 ${visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"}`}
-            style={{ transitionDelay: visible ? "60ms" : "0ms" }}
-          >
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/8 px-3 py-1 text-[11px] font-semibold tracking-wide text-primary/80 uppercase">
-              Route &amp; Operations Platform
-            </span>
-          </div>
 
           {/* Main Title */}
           <h1
-            className={`mx-auto max-w-[20ch] px-2 text-[clamp(1.5rem,6vw,2.4rem)] font-bold tracking-tight [text-wrap:balance] text-foreground transition-all duration-700 ${visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"}`}
+            className={`mx-auto max-w-[20ch] px-2 text-[clamp(1rem,4vw,1.4rem)] font-bold tracking-tight [text-wrap:balance] text-foreground transition-all duration-700 ${visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"}`}
             style={{ transitionDelay: visible ? "120ms" : "0ms" }}
           >
             Delivery{" "}
             <span className="bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent whitespace-nowrap">
               Operations
-            </span>{" "}
-            Made Simple
+            </span>
           </h1>
 
           {/* Description */}

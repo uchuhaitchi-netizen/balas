@@ -16,10 +16,6 @@ import {
   Zap,
   ChevronUp,
   ChevronDown,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -95,11 +91,10 @@ const RESOURCE_COLORS = [
 ]
 
 const OFF_SUB_TYPES = [
-  { id: "off",     label: "Off",    color: "#6B7280" },
-  { id: "absent",  label: "Absent", color: "#6B7280" },
-  { id: "public",  label: "PH",     color: "#6B7280" },
-  { id: "mc",      label: "MC",     color: "#6B7280" },
-  { id: "backup",  label: "Backup", color: "#F97316" },
+  { id: "off",     label: "Off",            color: "#6B7280" },
+  { id: "absent",  label: "Absent",         color: "#6B7280" },
+  { id: "public",  label: "PH", color: "#6B7280" },
+  { id: "mc",      label: "MC",             color: "#6B7280" },
 ] as const
 type OffSubTypeId = typeof OFF_SUB_TYPES[number]["id"]
 type ShiftTypeId = "route" | "off"
@@ -328,238 +323,6 @@ function detectCycleContext(
   }
 }
 
-// ─── ROTATION STATUS ──────────────────────────────────────────────────────────
-
-interface RotationStatus {
-  expectedRouteName: string
-  expectedRouteColor: string
-  workDaysScheduled: number
-  workDaysExpected: number
-  offDayExpected: boolean
-  offDayScheduled: boolean
-  status: "complete" | "partial" | "missing" | "mismatch" | "no_cycle"
-  mismatchedDates: string[]
-}
-
-/**
- * For a given staff member and a set of visible dates, compute how well their
- * actual shifts align with the rotation cycle that has been configured.
- */
-function computeRotationStatus(
-  staffId: string,
-  colDates: Date[],
-  allShifts: Shift[],
-  routes: RouteRef[],
-  routeCycle: string[],
-  staffCycleOffset: Record<string, string>,
-  routePatternStart: string,
-  routeEffectiveColorMap: Map<string, string>,
-): RotationStatus | null {
-  if (!routeCycle.length || colDates.length === 0) return null
-
-  // Determine effective cycle for this staff member
-  let effectiveCycle = rotateCycle(routeCycle, staffCycleOffset[staffId] ?? "")
-  let patternStart = new Date(routePatternStart + "T00:00:00")
-
-  // Try to detect the actual cycle context from existing shifts
-  const firstDateKey = toDateKey(colDates[0])
-  const ctx = detectCycleContext(staffId, firstDateKey, allShifts, routes, routeCycle)
-  if (ctx) {
-    effectiveCycle = ctx.effectiveCycle
-    patternStart = new Date(ctx.patternStart + "T00:00:00")
-  }
-
-  const cycleLen = effectiveCycle.length
-  const staffShifts = allShifts.filter(s => s.resourceId === staffId)
-
-  let expectedRouteName = ""
-  let expectedRouteColor = "#3B82F6"
-  let workDaysExpected = 0
-  let workDaysScheduled = 0
-  let offDayExpected = false
-  let offDayScheduled = false
-  const mismatchedDates: string[] = []
-
-  for (const date of colDates) {
-    const dateKey = toDateKey(date)
-    const diffDays = Math.round((date.getTime() - patternStart.getTime()) / 86400000)
-    if (diffDays < 0) continue
-    const blockIdx = Math.floor(diffDays / 7)
-    const dayInBlock = diffDays - blockIdx * 7
-
-    const isOffDay = dayInBlock === 6
-    const actual = staffShifts.find(s => s.date === dateKey)
-
-    if (isOffDay) {
-      offDayExpected = true
-      if (actual && OFF_LABELS.has(actual.title)) {
-        offDayScheduled = true
-      } else if (actual && !OFF_LABELS.has(actual.title)) {
-        mismatchedDates.push(dateKey) // worked on expected off day
-      }
-    } else {
-      workDaysExpected++
-      const cyclePos = ((blockIdx % cycleLen) + cycleLen) % cycleLen
-      const routeId = effectiveCycle[cyclePos] ?? ""
-      const routeRef = routes.find(r => r.id === routeId)
-
-      if (!expectedRouteName && routeRef) {
-        expectedRouteName = routeRef.name
-        const c = routeRef.color ?? routeEffectiveColorMap.get(routeRef.name) ?? "#3B82F6"
-        expectedRouteColor = c
-      }
-
-      if (actual && !OFF_LABELS.has(actual.title)) {
-        workDaysScheduled++
-        if (routeRef && actual.title !== routeRef.name) {
-          mismatchedDates.push(dateKey)
-        }
-      }
-    }
-  }
-
-  let status: RotationStatus["status"]
-  if (!expectedRouteName) {
-    status = "no_cycle"
-  } else if (mismatchedDates.length > 0) {
-    status = "mismatch"
-  } else if (workDaysScheduled === 0) {
-    status = "missing"
-  } else if (workDaysScheduled < workDaysExpected) {
-    status = "partial"
-  } else {
-    status = "complete"
-  }
-
-  return {
-    expectedRouteName,
-    expectedRouteColor,
-    workDaysScheduled,
-    workDaysExpected,
-    offDayExpected,
-    offDayScheduled,
-    status,
-    mismatchedDates,
-  }
-}
-
-// ─── CYCLE TICK LIST ──────────────────────────────────────────────────────────
-
-interface RouteBlockProgress {
-  routeId: string
-  routeName: string
-  routeColor: string
-  routeShift: string
-  blockStartDate: string
-  daysScheduled: number    // 0–6 work days actually recorded in this block
-  isCurrent: boolean
-  isPast: boolean
-}
-
-interface DriverCycleProgress {
-  effectiveCycle: string[]
-  patternStartDate: string
-  currentRound: number
-  currentCyclePos: number
-  routes: RouteBlockProgress[]
-  roundComplete: boolean
-}
-
-/**
- * For a driver today, compute how many of the 6 work-days have been recorded
- * for each route in the CURRENT cycle round.
- * Current round = the set of cycleLen consecutive blocks that contains today.
- * Auto-resets to round+1 once all routes hit 6 scheduled days.
- */
-function computeDriverCycleProgress(
-  staffId: string,
-  today: Date,
-  allShifts: Shift[],
-  routes: RouteRef[],
-  routeCycle: string[],
-  staffCycleOffset: Record<string, string>,
-  routePatternStart: string,
-  routeEffectiveColorMap: Map<string, string>,
-): DriverCycleProgress | null {
-  if (!routeCycle.length) return null
-
-  const todayKey = toDateKey(today)
-
-  let effectiveCycle = rotateCycle(routeCycle, staffCycleOffset[staffId] ?? "")
-  let patternStart = new Date(routePatternStart + "T00:00:00")
-
-  const ctx = detectCycleContext(staffId, todayKey, allShifts, routes, routeCycle)
-  if (ctx) {
-    effectiveCycle = ctx.effectiveCycle
-    patternStart = new Date(ctx.patternStart + "T00:00:00")
-  }
-
-  const cycleLen = effectiveCycle.length
-  if (cycleLen === 0) return null
-
-  const diffToday = Math.round((today.getTime() - patternStart.getTime()) / 86400000)
-  if (diffToday < 0) return null
-
-  const blockIdx       = Math.floor(diffToday / 7)
-  const currentCyclePos = blockIdx % cycleLen
-  let currentRound     = Math.floor(blockIdx / cycleLen)
-
-  const staffWorkShifts = allShifts.filter(s => s.resourceId === staffId && !OFF_LABELS.has(s.title))
-
-  // Build progress for each route in current round
-  const buildRound = (round: number): RouteBlockProgress[] =>
-    effectiveCycle.map((routeId, cyclePos) => {
-      const roundBlockIdx   = round * cycleLen + cyclePos
-      const blockStartMs    = patternStart.getTime() + roundBlockIdx * 7 * 86400000
-      const blockStartDate  = new Date(blockStartMs)
-
-      // Compute the 6 work-day keys for this block
-      const blockKeys: string[] = []
-      for (let d = 0; d < 6; d++) {
-        const nd = new Date(blockStartMs + d * 86400000)
-        blockKeys.push(toDateKey(nd))
-      }
-
-      const routeRef   = routes.find(r => r.id === routeId)
-      const routeName  = routeRef?.name ?? routeId
-      const routeColor = routeRef?.color ?? routeEffectiveColorMap.get(routeName) ?? "#3B82F6"
-
-      const daysScheduled = staffWorkShifts.filter(
-        s => s.title === routeName && blockKeys.includes(s.date)
-      ).length
-
-      return {
-        routeId,
-        routeName,
-        routeColor,
-        routeShift: routeRef?.shift ?? "",
-        blockStartDate: toDateKey(blockStartDate),
-        daysScheduled,
-        isCurrent: cyclePos === currentCyclePos,
-        isPast:    cyclePos < currentCyclePos,
-      }
-    })
-
-  let routeBlocks  = buildRound(currentRound)
-  let roundComplete = routeBlocks.every(b => b.daysScheduled >= 6)
-
-  // If the current round is fully complete, advance to next round automatically
-  if (roundComplete) {
-    currentRound++
-    routeBlocks   = buildRound(currentRound)
-    roundComplete  = routeBlocks.every(b => b.daysScheduled >= 6)
-  }
-
-  return {
-    effectiveCycle,
-    patternStartDate: toDateKey(patternStart),
-    currentRound,
-    currentCyclePos,
-    routes: routeBlocks,
-    roundComplete,
-  }
-}
-
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
 
 async function apiFetchAll(): Promise<{ resources: Resource[]; shifts: Shift[] }> {
@@ -781,34 +544,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
   const [isGenerating, setIsGenerating] = useState(false)
   const [historyQuery, setHistoryQuery] = useState("")
 
-  // Rotation panel open/close state
-  const [rotationPanelOpen, setRotationPanelOpen] = useState(
-    () => localStorage.getItem("rooster_rotation_panel_open") !== "false"
-  )
-  // Tick list visibility inside rotation panel
-  const [tickListOpen, setTickListOpen] = useState(
-    () => localStorage.getItem("rooster_tick_list_open") !== "false"
-  )
-
-  // Forecast dialog
-  const [forecastOpen, setForecastOpen] = useState(false)
-  const [forecastWeeksCount, setForecastWeeksCount] = useState(6)
-
-  // Rotation-only view
-  const [rotationViewOnly, setRotationViewOnly] = useState(false)
-
-  // Generate the Monday dates for the forecast
-  const forecastWeeks = useMemo(() => {
-    const weeks: Date[] = []
-    const monday = getMondayOf(new Date())
-    for (let i = 0; i < forecastWeeksCount; i++) {
-      const d = new Date(monday)
-      d.setDate(monday.getDate() + i * 7)
-      weeks.push(d)
-    }
-    return weeks
-  }, [forecastWeeksCount])
-
   // Selected shifts for bulk actions
   const [selectedShifts, setSelectedShifts] = useState<string[]>([])
 
@@ -875,8 +610,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
   useEffect(() => { localStorage.setItem("rooster_staff_route_starts", JSON.stringify(staffRouteStarts)) }, [staffRouteStarts])
   useEffect(() => { localStorage.setItem("rooster_staff_cycle_offset", JSON.stringify(staffCycleOffset)) }, [staffCycleOffset])
   useEffect(() => { localStorage.setItem("rooster_resource_order", JSON.stringify(resourceOrder)) }, [resourceOrder])
-  useEffect(() => { localStorage.setItem("rooster_rotation_panel_open", String(rotationPanelOpen)) }, [rotationPanelOpen])
-  useEffect(() => { localStorage.setItem("rooster_tick_list_open", String(tickListOpen)) }, [tickListOpen])
 
   // Auto-sync resourceOrder when resources are added/removed
   useEffect(() => {
@@ -981,32 +714,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
     return true
   }, [shiftForm, shiftType, offSubType])
 
-  // Routes filtered for the shift dialog: hides routes where the driver has already
-  // completed a full 6-day work block. Resets when ALL routes reach that threshold (new cycle).
-  const filteredRoutesForDialog = useMemo(() => {
-    const resourceId = shiftForm.resourceId
-    if (!resourceId || routes.length === 0) return routes
-
-    const editingShiftId = shiftDialog.shift?.id ?? ""
-    const staffRouteShifts = shifts.filter(
-      s => s.resourceId === resourceId && !OFF_LABELS.has(s.title) && s.id !== editingShiftId
-    )
-
-    // Count how many days each route has been worked
-    const routeCount = new Map<string, number>()
-    staffRouteShifts.forEach(s => routeCount.set(s.title, (routeCount.get(s.title) ?? 0) + 1))
-
-    // A route block is "complete" when the driver has worked it for 6+ days
-    const completedRoutes = new Set(routes.filter(r => (routeCount.get(r.name) ?? 0) >= 6).map(r => r.name))
-
-    // If every route has a completed block → new cycle, show all
-    const allDone = routes.every(r => completedRoutes.has(r.name))
-    if (allDone) return routes
-
-    // Hide completed routes; always keep the currently selected one visible
-    return routes.filter(r => !completedRoutes.has(r.name) || r.name === shiftForm.title)
-  }, [routes, shifts, shiftForm.resourceId, shiftForm.title, shiftDialog.shift?.id])
-
   // Resource form state
   const [resForm, setResForm] = useState({
     name: "",
@@ -1045,32 +752,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
   const colDates: Date[] = viewMode === "month" ? monthDates : weekDates
   const staffColWidth = 82
   const dayColWidth = 70  // same width for both week and month; month scrolls horizontally
-
-  // ── Rotation compliance status for each staff in current view ─────────────
-  const rotationStatuses = useMemo(() => {
-    if (!routeCycle.length) return new Map<string, RotationStatus | null>()
-    const map = new Map<string, RotationStatus | null>()
-    for (const r of orderedResources) {
-      map.set(r.id, computeRotationStatus(
-        r.id, colDates, shifts, routes, routeCycle,
-        staffCycleOffset, routePatternStart, routeEffectiveColorMap
-      ))
-    }
-    return map
-  }, [orderedResources, colDates, shifts, routes, routeCycle, staffCycleOffset, routePatternStart, routeEffectiveColorMap])
-
-  // ── Per-driver cycle tick list progress ───────────────────────────────────
-  const driverCycleProgresses = useMemo(() => {
-    if (!routeCycle.length) return new Map<string, DriverCycleProgress | null>()
-    const map = new Map<string, DriverCycleProgress | null>()
-    for (const r of orderedResources) {
-      map.set(r.id, computeDriverCycleProgress(
-        r.id, today, shifts, routes, routeCycle,
-        staffCycleOffset, routePatternStart, routeEffectiveColorMap
-      ))
-    }
-    return map
-  }, [orderedResources, today, shifts, routes, routeCycle, staffCycleOffset, routePatternStart, routeEffectiveColorMap])
 
   // ── Shift CRUD ────────────────────────────────────────────────────────────
 
@@ -1302,13 +983,13 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
         cursor.setDate(cursor.getDate() + 1)
       }
 
-      if (newShifts.length === 0) { toast.success("No new shifts to generate."); return }
+      if (newShifts.length === 0) { toast.success("Tiada shift baru untuk dijana."); return }
       const results = await Promise.all(newShifts.map(s => apiSaveShift(s)))
       const saved = newShifts.filter((_, i) => results[i])
       if (saved.length > 0) {
         setShifts(prev => [...prev, ...saved])
-        toast.success(`${saved.length} shifts generated for ${resources.find(r => r.id === staffId)?.name ?? staffId}`)
-      } else toast.error("Failed to save shifts")
+        toast.success(`${saved.length} shift dijana untuk ${resources.find(r => r.id === staffId)?.name ?? staffId}`)
+      } else toast.error("Gagal simpan shift")
     } finally {
       setIsGenerating(false)
     }
@@ -1328,7 +1009,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
     })
     
     if (conflicts.length > 0) {
-      toast.error(`Cannot move: ${conflicts[0].date} already has a shift`)
+      toast.error(`Tidak boleh alih: ${conflicts[0].date} sudah ada shift`)
       return
     }
 
@@ -1360,95 +1041,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
       clearSelection()
     } else {
       toast.error("Failed to delete some shifts")
-    }
-  }
-
-  // Auto-assign all drivers for empty days in the current view, following
-  // the 6-work / 1-off block pattern with per-driver route offset.
-  const handleAutoAssignAllRoutes = async () => {
-    if (!routeCycle.length || !orderedResources.length) return
-    setIsGenerating(true)
-    try {
-      const batchId = Date.now()
-      const pending: Shift[] = []
-      const offType = OFF_SUB_TYPES.find(t => t.id === "off")!
-      const firstDateKey = toDateKey(colDates[0])
-
-      for (let driverIdx = 0; driverIdx < orderedResources.length; driverIdx++) {
-        const resource = orderedResources[driverIdx]
-
-        // Per-driver route offset — each driver starts at a different position in the cycle.
-        // Priority: staffCycleOffset config → fallback to driverIdx so drivers never share the same route.
-        const offsetRouteId = staffCycleOffset[resource.id]
-          ?? routeCycle[driverIdx % routeCycle.length]
-          ?? ""
-        let effectiveCycle = rotateCycle(routeCycle, offsetRouteId)
-
-        // Pattern anchor — try to detect from existing shifts first
-        let patternStart = new Date((staffRouteStarts[resource.id] ?? routePatternStart) + "T00:00:00")
-        const ctx = detectCycleContext(resource.id, firstDateKey, shifts, routes, routeCycle)
-        if (ctx) {
-          effectiveCycle = ctx.effectiveCycle
-          patternStart = new Date(ctx.patternStart + "T00:00:00")
-        }
-
-        const cycleLen = effectiveCycle.length
-
-        for (const date of colDates) {
-          const dateKey = toDateKey(date)
-          // Skip days that already have a shift (real or pending)
-          if (shifts.some(s => s.resourceId === resource.id && s.date === dateKey)) continue
-          if (pending.some(s => s.resourceId === resource.id && s.date === dateKey)) continue
-
-          const diffDays = Math.round((date.getTime() - patternStart.getTime()) / 86400000)
-          if (diffDays < 0) continue
-          const blockIdx  = Math.floor(diffDays / 7)
-          const dayInBlock = diffDays - blockIdx * 7  // 0-5 = work, 6 = off
-
-          if (dayInBlock === 6) {
-            // Off day
-            pending.push({
-              id: `auto${batchId}_${resource.id}_${dateKey}`,
-              resourceId: resource.id,
-              date: dateKey,
-              title: offType.label,
-              startHour: 0,
-              endHour: 24,
-              color: offType.color,
-            })
-          } else {
-            // Work day — pick route from the driver's effective cycle
-            const cyclePos  = ((blockIdx % cycleLen) + cycleLen) % cycleLen
-            const routeId   = effectiveCycle[cyclePos] ?? ""
-            const routeRef  = routes.find(r => r.id === routeId)
-            const routeName = routeRef?.name ?? routeId
-            const preset    = getShiftPreset(routeRef?.shift ?? "")
-            const color     = routeEffectiveColorMap.get(routeName) ?? routeRef?.color ?? "#3B82F6"
-            pending.push({
-              id: `auto${batchId}_${resource.id}_${dateKey}`,
-              resourceId: resource.id,
-              date: dateKey,
-              title: routeName,
-              startHour: preset.startHour,
-              endHour: preset.endHour,
-              color,
-            })
-          }
-        }
-      }
-
-      if (pending.length === 0) {
-        toast.success("All visible days already have shifts.")
-        return
-      }
-      const results = await Promise.all(pending.map(s => apiSaveShift(s)))
-      const saved = pending.filter((_, i) => results[i])
-      if (saved.length > 0) {
-        setShifts(prev => [...prev, ...saved])
-        toast.success(`${saved.length} shifts auto-assigned across ${orderedResources.length} driver${orderedResources.length > 1 ? "s" : ""}`)
-      } else toast.error("Failed to save shifts")
-    } finally {
-      setIsGenerating(false)
     }
   }
 
@@ -1507,7 +1099,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
       <div className="px-4 sm:px-5 lg:px-6 pt-4 sm:pt-5 pb-2 shrink-0">
         <div className="mb-2 flex items-center gap-2.5 sm:gap-3">
           <Users className="size-3.5 text-primary" />
-          <h1 className="text-[13px] font-semibold tracking-tight text-foreground">Rooster</h1>
+          <h1 className="text-base font-semibold leading-tight text-foreground">Rooster</h1>
         </div>
         <p className="ml-6 text-[11px] leading-relaxed text-muted-foreground/90 sm:ml-7">Staff scheduling &amp; shift overview</p>
       </div>
@@ -1545,14 +1137,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
             className={`h-7 px-3 text-xs font-semibold rounded-lg border border-border bg-card transition-colors shrink-0 ${viewModeTransition !== "idle" ? "opacity-60 cursor-not-allowed" : "hover:bg-muted"}`}
           >
             {viewMode === "month" ? "Month" : "Week"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRotationViewOnly(v => !v)}
-            className={`h-7 px-3 text-xs font-semibold rounded-lg border transition-colors shrink-0 ${rotationViewOnly ? "border-primary bg-primary/10 text-primary" : "border-border bg-card hover:bg-muted"}`}
-            title="Show rotation view only"
-          >
-            Rotation
           </button>
 
           {isEditMode && (
@@ -1596,7 +1180,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
             )}
             {/* date picker */}
             <label
-              title="Pick date"
+              title="Pilih tarikh"
               className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-muted-foreground/60 transition-colors hover:bg-primary/10 hover:text-primary"
             >
               <CalendarDays className="w-3.5 h-3.5" />
@@ -1610,45 +1194,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
               />
             </label>
           </div>
-
-          {/* Rotation panel toggle — always visible when cycle is configured */}
-          {routeCycle.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setRotationPanelOpen(p => !p)}
-              className={`flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[11px] font-semibold transition-colors shrink-0 ${
-                rotationPanelOpen
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-              title="Check driver rotation"
-            >
-              <RefreshCw className="size-3" />Rotation
-            </button>
-          )}
-
-          {/* Forecast report button */}
-          {routeCycle.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setForecastOpen(true)}
-              className="flex items-center gap-1 h-8 px-2.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted text-[11px] font-semibold transition-colors shrink-0"
-              title="Rotation schedule"
-            >
-              <CalendarDays className="size-3" />Schedule
-            </button>
-          )}
-
-          {isEditMode && routes.length > 0 && (
-            <button
-              onClick={handleAutoAssignAllRoutes}
-              disabled={isGenerating}
-              className="flex items-center gap-1 h-8 px-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-colors shrink-0 disabled:opacity-50 disabled:pointer-events-none"
-              title="Auto-assign next unassigned route to all drivers for every empty day in the current view"
-            >
-              <Zap className="size-3" />Auto-assign
-            </button>
-          )}
 
           {isEditMode && (
             <button
@@ -1758,199 +1303,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
         )}
       </div>
 
-      {/* ── Rotation Status Panel ───────────────────────────────────────────── */}
-      {rotationPanelOpen && routeCycle.length > 0 && !historyQuery.trim() && (
-        <div className="px-4 sm:px-5 lg:px-6 py-2 border-b border-border/70 bg-muted/20 shrink-0">
-          <div className="flex items-center gap-2 mb-2">
-            <RefreshCw className="size-3 text-primary" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Route Rotation — {viewMode === "week" ? "This Week" : "This Month"}
-            </span>
-            {/* summary counts */}
-            {(() => {
-              const statuses = orderedResources.map(r => rotationStatuses.get(r.id))
-              const complete = statuses.filter(s => s?.status === "complete").length
-              const partial  = statuses.filter(s => s?.status === "partial").length
-              const missing  = statuses.filter(s => s?.status === "missing").length
-              const mismatch = statuses.filter(s => s?.status === "mismatch").length
-              return (
-                <div className="flex items-center gap-1.5 ml-auto">
-                  {complete > 0  && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">{complete} complete</span>}
-                  {partial > 0   && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400">{partial} partial</span>}
-                  {mismatch > 0  && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400">{mismatch} mismatch</span>}
-                  {missing > 0   && <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/15 text-red-600 dark:text-red-400">{missing} no shift</span>}
-                </div>
-              )
-            })()}
-          </div>
-          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
-            {orderedResources.map(resource => {
-              const rs = rotationStatuses.get(resource.id)
-              if (!rs || rs.status === "no_cycle") return null
-
-              const statusConfig = {
-                complete: { icon: <CheckCircle2 className="size-3 shrink-0" />, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/8 border-emerald-500/20", label: "Complete" },
-                partial:  { icon: <AlertTriangle className="size-3 shrink-0" />, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/8 border-amber-500/20", label: `${rs.workDaysScheduled}/${rs.workDaysExpected} days` },
-                missing:  { icon: <XCircle className="size-3 shrink-0" />, color: "text-red-600 dark:text-red-400", bg: "bg-red-500/8 border-red-500/20", label: "No Shift" },
-                mismatch: { icon: <AlertTriangle className="size-3 shrink-0" />, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/8 border-orange-500/20", label: "Mismatch" },
-              }[rs.status]
-
-              return (
-                <div key={resource.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${statusConfig.bg}`}>
-                  {/* Route color swatch */}
-                  {rs.expectedRouteName && (
-                    <div className="shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: rs.expectedRouteColor }} />
-                  )}
-                  {/* Driver name */}
-                  <span className="flex-1 text-[10px] font-semibold text-foreground truncate">{resource.name}</span>
-                  {/* Expected route */}
-                  {rs.expectedRouteName && (
-                    <span className="text-[9px] text-muted-foreground truncate max-w-[60px]">{rs.expectedRouteName}</span>
-                  )}
-                  {/* Days count for partial */}
-                  {rs.status === "partial" && (
-                    <span className="text-[9px] font-bold tabular-nums text-muted-foreground">{rs.workDaysScheduled}/{rs.workDaysExpected}</span>
-                  )}
-                  {/* Status icon */}
-                  <span className={statusConfig.color}>{statusConfig.icon}</span>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* ── Cycle Tick List ─────────────────────────────────────────────── */}
-          <div className="mt-2 border-t border-border/40 pt-2">
-            {/* Sub-header with toggle */}
-            <button
-              type="button"
-              onClick={() => setTickListOpen(p => !p)}
-              className="flex items-center gap-1.5 w-full mb-1.5 group"
-            >
-              <div className={`w-3.5 h-3.5 rounded transition-transform ${tickListOpen ? "rotate-90" : ""}`}>
-                <ChevronRight className="size-3.5 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
-              </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/70 group-hover:text-foreground transition-colors">
-                Cycle Tick List — Round Progress
-              </span>
-              <span className="text-[9px] text-muted-foreground/50 ml-1">
-                (6 work days per route)
-              </span>
-            </button>
-
-            {tickListOpen && (
-              <div className="flex flex-col gap-1.5">
-                {orderedResources.map(resource => {
-                  const cp = driverCycleProgresses.get(resource.id)
-                  if (!cp) return null
-
-                  return (
-                    <div key={resource.id} className="rounded-lg border border-border/50 bg-background/60 px-2.5 py-2">
-                      {/* Driver header */}
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
-                        <span className="text-[10px] font-bold text-foreground">{resource.name}</span>
-                        <span className="text-[9px] text-muted-foreground/60 ml-auto">
-                          Round {cp.currentRound + 1}
-                        </span>
-                        {cp.roundComplete && (
-                          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="size-2.5" />Selesai
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Route rows */}
-                      <div className="flex flex-col gap-1">
-                        {cp.routes.map((rb, idx) => {
-                          const isAm = rb.routeShift?.toUpperCase() === "AM"
-                          const isPm = rb.routeShift?.toUpperCase() === "PM"
-                          const filled = Math.min(rb.daysScheduled, 6)
-                          const isDone = filled >= 6
-
-                          return (
-                            <div
-                              key={rb.routeId}
-                              className={`flex items-center gap-2 px-2 py-1 rounded-md transition-colors ${
-                                rb.isCurrent
-                                  ? "bg-primary/8 border border-primary/25"
-                                  : isDone
-                                  ? "bg-emerald-500/5 border border-emerald-500/15"
-                                  : rb.isPast
-                                  ? "border border-border/30 bg-muted/20"
-                                  : "border border-border/20 bg-transparent"
-                              }`}
-                            >
-                              {/* Position number */}
-                              <span className={`shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                                rb.isCurrent ? "bg-primary text-primary-foreground" :
-                                isDone       ? "bg-emerald-500 text-white" :
-                                              "bg-muted text-muted-foreground"
-                              }`}>
-                                {idx + 1}
-                              </span>
-
-                              {/* Route name */}
-                              <span
-                                className={`text-[9px] font-semibold flex-1 truncate ${
-                                  rb.isCurrent ? "text-foreground" : isDone ? "text-foreground/70" : rb.isPast ? "text-muted-foreground" : "text-muted-foreground/60"
-                                }`}
-                                title={rb.routeName}
-                              >
-                                {rb.routeName}
-                              </span>
-
-                              {/* AM/PM badge */}
-                              {(isAm || isPm) && (
-                                <span className={`shrink-0 text-[8px] font-bold px-1 py-0.5 rounded ${
-                                  isAm ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-orange-500/15 text-orange-600 dark:text-orange-400"
-                                }`}>
-                                  {rb.routeShift.toUpperCase()}
-                                </span>
-                              )}
-
-                              {/* 6 tick dots */}
-                              <div className="flex items-center gap-[3px] shrink-0">
-                                {Array.from({ length: 6 }, (_, i) => (
-                                  <div
-                                    key={i}
-                                    className={`w-2 h-2 rounded-sm transition-colors ${
-                                      i < filled
-                                        ? isDone
-                                          ? "bg-emerald-500"
-                                          : rb.isCurrent
-                                          ? "bg-primary"
-                                          : "bg-muted-foreground/40"
-                                        : "bg-muted-foreground/15 border border-border/40"
-                                    }`}
-                                    title={`Day ${i + 1}${i < filled ? " — scheduled" : " — pending"}`}
-                                  />
-                                ))}
-                              </div>
-
-                              {/* Count label */}
-                              <span className={`shrink-0 text-[9px] font-bold tabular-nums w-6 text-right ${
-                                isDone ? "text-emerald-600 dark:text-emerald-400" :
-                                rb.isCurrent ? "text-primary" :
-                                "text-muted-foreground/60"
-                              }`}>
-                                {filled}/6
-                              </span>
-
-                              {/* Done checkmark */}
-                              {isDone && <CheckCircle2 className="size-3 shrink-0 text-emerald-500" />}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Grid ─────────────────────────────────────────────────────────────── */}
       <div className={`flex-1 min-h-0 overflow-auto transition-all duration-200 ease-out ${viewModeTransition === "out" ? "opacity-0 scale-[0.98]" : "opacity-100 scale-100"}`}>
         {resources.length === 0 ? (
@@ -2015,8 +1367,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
             <tbody>
               {orderedResources.map((resource, ri) => {
                 const rowShifts = shifts.filter(s => s.resourceId === resource.id)
-                const colDateKeys = new Set(colDates.map(d => toDateKey(d)))
-                const visibleShiftCount = rowShifts.filter(s => colDateKeys.has(s.date)).length
                 return (
                   <tr
                     key={resource.id}
@@ -2030,24 +1380,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
                         {resource.role && (
                           <p className="text-[9px] text-muted-foreground leading-tight mt-0.5 whitespace-nowrap">{resource.role}</p>
                         )}
-                        <p className="text-[9px] text-muted-foreground/60 leading-tight mt-0.5 whitespace-nowrap tabular-nums">{visibleShiftCount} shift</p>
-                        {/* Rotation status indicator */}
-                        {(() => {
-                          const rs = rotationStatuses.get(resource.id)
-                          if (!rs || rs.status === "no_cycle") return null
-                          const dotCfg = {
-                            complete: { cls: "bg-emerald-500", title: `Complete — ${rs.expectedRouteName}` },
-                            partial:  { cls: "bg-amber-500",  title: `Partial ${rs.workDaysScheduled}/${rs.workDaysExpected} days — ${rs.expectedRouteName}` },
-                            missing:  { cls: "bg-red-500",    title: `No shift — expected: ${rs.expectedRouteName}` },
-                            mismatch: { cls: "bg-orange-500", title: `Off rotation — expected: ${rs.expectedRouteName}` },
-                          }[rs.status]
-                          return (
-                            <span
-                              className={`inline-block w-1.5 h-1.5 rounded-full mt-1 ${dotCfg.cls}`}
-                              title={dotCfg.title}
-                            />
-                          )
-                        })()}
                       </div>
                       {isEditMode && (
                         <div className="flex items-center justify-center gap-0.5 mt-2">
@@ -2079,62 +1411,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
 
                     {/* ── Day cells — merged when consecutive days share the same shift pattern ── */}
                     {(() => {
-                      // ── Rotation-only view ──────────────────────────────
-                      if (rotationViewOnly && !isEditMode) {
-                        if (routeCycle.length === 0) {
-                          return colDates.map(date => (
-                            <td key={toDateKey(date)} className="border-b border-r border-border align-middle" style={{ width: `${dayColWidth}px`, minWidth: `${dayColWidth}px` }}>
-                              <div className="flex items-center justify-center px-0.5 py-1" style={{ minHeight: 30 }}>
-                                <span className="text-[8px] text-muted-foreground/40 italic">–</span>
-                              </div>
-                            </td>
-                          ))
-                        }
-                        return colDates.map(date => {
-                          const dateKey = toDateKey(date)
-                          const isToday = isSameDay(date, today)
-                          let effectiveCycle = rotateCycle(routeCycle, staffCycleOffset[resource.id] ?? "")
-                          let patternStartDate = new Date(routePatternStart + "T00:00:00")
-                          const ctx = detectCycleContext(resource.id, dateKey, shifts, routes, routeCycle)
-                          if (ctx) {
-                            effectiveCycle = ctx.effectiveCycle
-                            patternStartDate = new Date(ctx.patternStart + "T00:00:00")
-                          }
-                          const diff = Math.round((date.getTime() - patternStartDate.getTime()) / 86400000)
-                          let cellContent: React.ReactNode = null
-                          if (diff >= 0) {
-                            const dayInBlock = ((diff % 7) + 7) % 7
-                            if (dayInBlock === 6) {
-                              cellContent = <span className="text-[8px] font-semibold text-muted-foreground/40 italic">OFF</span>
-                            } else {
-                              const blockIdx = Math.floor(diff / 7)
-                              const routeId = effectiveCycle[blockIdx % effectiveCycle.length]
-                              const route = routes.find(r => r.id === routeId)
-                              const color = routeEffectiveColorMap.get(route?.name ?? "") ?? "#888"
-                              cellContent = (
-                                <span
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
-                                  style={{ background: color + '22', color, border: `1px solid ${color}44` }}
-                                >
-                                  {route?.name ?? "–"}
-                                </span>
-                              )
-                            }
-                          }
-                          return (
-                            <td
-                              key={dateKey}
-                              className={`border-b border-r border-border align-middle ${isToday ? "bg-primary/[0.04]" : ""}`}
-                              style={{ width: `${dayColWidth}px`, minWidth: `${dayColWidth}px` }}
-                            >
-                              <div className="flex items-center justify-center px-0.5 py-1" style={{ minHeight: 30 }}>
-                                {cellContent}
-                              </div>
-                            </td>
-                          )
-                        })
-                      }
-
                       const mkBlock = (shift: Shift) => (
                         <ShiftBlock
                           key={shift.id}
@@ -2319,19 +1595,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
 
                 {shiftType === "route" && (
                   <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium">Route</label>
-                      {routes.length > 0 && shiftForm.resourceId && (() => {
-                        const editingShiftId = shiftDialog.shift?.id ?? ""
-                        const staffShifts = shifts.filter(s => s.resourceId === shiftForm.resourceId && !OFF_LABELS.has(s.title) && s.id !== editingShiftId)
-                        const routeCount = new Map<string, number>()
-                        staffShifts.forEach(s => routeCount.set(s.title, (routeCount.get(s.title) ?? 0) + 1))
-                        const allDone = routes.every(r => (routeCount.get(r.name) ?? 0) >= 6)
-                        const remaining = routes.filter(r => (routeCount.get(r.name) ?? 0) < 6).length
-                        if (allDone) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">All routes done — new cycle</span>
-                        return <span className="text-[10px] text-muted-foreground">{remaining} of {routes.length} remaining</span>
-                      })()}
-                    </div>
+                    <label className="text-sm font-medium">Route</label>
                     <select
                       value={shiftForm.title}
                       onChange={e => {
@@ -2343,7 +1607,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
                       className="h-9 w-full rounded-md border border-input bg-background px-3 text-[11px] md:text-[11px] focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                         <option value="">-- Select Route --</option>
-                      {filteredRoutesForDialog.map(r => (
+                      {routes.map(r => (
                         <option key={r.id} value={r.name}>{r.name}{r.code ? ` (${r.code})` : ""} — {r.shift}</option>
                       ))}
                     </select>
@@ -2591,61 +1855,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
                     </div>
                   </div>
 
-                  {/* ── Per-driver Rotation Status ── */}
-                  <div className="rounded-xl border border-border/70 bg-muted/10 p-3 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 text-primary shrink-0">
-                        <RefreshCw className="size-3.5" />
-                      </div>
-                      <p className="text-[12px] font-semibold text-foreground">Driver Rotation Status</p>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Check whether each driver has completed their assigned route rotation for the selected period.
-                    </p>
-                    {orderedResources.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground italic text-center py-2">No drivers added.</p>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        {orderedResources.map(resource => {
-                          const rs = computeRotationStatus(
-                            resource.id,
-                            getDateKeysInRange(genFrom, genTo).map(k => new Date(k + "T00:00:00")),
-                            shifts, routes, routeCycle, staffCycleOffset, routePatternStart, routeEffectiveColorMap
-                          )
-                          if (!rs || rs.status === "no_cycle") {
-                            return (
-                              <div key={resource.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-border/40 bg-background">
-                                <span className="flex-1 text-[11px] font-medium text-foreground truncate">{resource.name}</span>
-                                <span className="text-[9px] text-muted-foreground italic">No rotation</span>
-                              </div>
-                            )
-                          }
-                          const statusCfg = {
-                            complete: { icon: <CheckCircle2 className="size-3.5" />, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/8 border-emerald-500/20", label: "Complete" },
-                            partial:  { icon: <AlertTriangle className="size-3.5" />, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/8 border-amber-500/20", label: `${rs.workDaysScheduled}/${rs.workDaysExpected} days` },
-                            missing:  { icon: <XCircle className="size-3.5" />,       color: "text-red-600 dark:text-red-400",     bg: "bg-red-500/8 border-red-500/20",     label: "No Shift" },
-                            mismatch: { icon: <AlertTriangle className="size-3.5" />, color: "text-orange-600 dark:text-orange-400", bg: "bg-orange-500/8 border-orange-500/20", label: "Mismatch" },
-                          }[rs.status]
-                          return (
-                            <div key={resource.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${statusCfg.bg}`}>
-                              {rs.expectedRouteName && (
-                                <div className="shrink-0 w-2 h-2 rounded-full" style={{ backgroundColor: rs.expectedRouteColor }} />
-                              )}
-                              <span className="flex-1 text-[11px] font-medium text-foreground truncate">{resource.name}</span>
-                              {rs.expectedRouteName && (
-                                <span className="text-[9px] text-muted-foreground truncate max-w-[55px]">{rs.expectedRouteName}</span>
-                              )}
-                              <span className={`flex items-center gap-0.5 text-[10px] font-semibold ${statusCfg.color}`}>
-                                {statusCfg.icon}
-                                {statusCfg.label}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-
                   {/* ── Auto Shift Generator ── */}
                   <div className="rounded-xl border border-border/70 bg-muted/20 p-3 flex flex-col gap-3">
                     <div className="flex items-center gap-2">
@@ -2767,19 +1976,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
             {/* ── Route dropdown grouped by AM/PM ── */}
             {shiftType === "route" && (
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Route</label>
-                  {routes.length > 0 && shiftForm.resourceId && (() => {
-                    const editingShiftId = shiftDialog.shift?.id ?? ""
-                    const staffShifts = shifts.filter(s => s.resourceId === shiftForm.resourceId && !OFF_LABELS.has(s.title) && s.id !== editingShiftId)
-                    const routeCount = new Map<string, number>()
-                    staffShifts.forEach(s => routeCount.set(s.title, (routeCount.get(s.title) ?? 0) + 1))
-                    const allDone = routes.every(r => (routeCount.get(r.name) ?? 0) >= 6)
-                    const remaining = routes.filter(r => (routeCount.get(r.name) ?? 0) < 6).length
-                    if (allDone) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">All routes done — new cycle</span>
-                    return <span className="text-[10px] text-muted-foreground">{remaining} of {routes.length} remaining</span>
-                  })()}
-                </div>
+                <label className="text-sm font-medium">Route</label>
                 <select
                   value={shiftForm.title}
                   onChange={e => {
@@ -2795,7 +1992,7 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-[11px] md:text-[11px] focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="">-- Select Route --</option>
-                  {filteredRoutesForDialog.map(r => (
+                  {routes.map(r => (
                     <option key={r.id} value={r.name}>{r.name}{r.code ? ` (${r.code})` : ""} — {r.shift}</option>
                   ))}
                 </select>
@@ -3199,212 +2396,6 @@ export function Rooster({ viewMode: viewModeProp = "week" }: { viewMode?: ViewMo
               Delete Staff
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Rotation Forecast Dialog ─────────────────────────────────────────── */}
-      <Dialog open={forecastOpen} onOpenChange={setForecastOpen}>
-        <DialogContent className="max-w-5xl w-[95vw] rounded-2xl p-0 overflow-hidden gap-0" onOpenAutoFocus={e => e.preventDefault()}>
-          <DialogHeader className="px-5 pt-5 pb-3 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="flex shrink-0 items-center justify-center p-2 bg-primary/10 rounded-lg text-primary">
-                <CalendarDays className="size-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <DialogTitle className="text-base font-semibold tracking-tight">Route Rotation Schedule</DialogTitle>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Projected expected routes for each driver by week</p>
-              </div>
-              {/* Week count selector */}
-              <div className="flex items-center gap-1 shrink-0">
-                {[4, 6, 8].map(n => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setForecastWeeksCount(n)}
-                    className={`h-7 px-2.5 rounded-md text-[11px] font-semibold border transition-colors ${
-                      forecastWeeksCount === n
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border bg-muted/40 text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {n}W
-                  </button>
-                ))}
-              </div>
-            </div>
-          </DialogHeader>
-          <Separator />
-
-          {routeCycle.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-              <RefreshCw className="size-8 opacity-20" />
-              <p className="text-sm">No route rotation configured yet.</p>
-              <p className="text-xs text-muted-foreground/70">Add routes in the Route List, then use Manage → Route to view the schedule.</p>
-            </div>
-          ) : (
-            <div className="overflow-auto max-h-[70vh]">
-              <table className="border-collapse w-full text-left" style={{ tableLayout: "fixed", minWidth: `${120 + forecastWeeksCount * 130}px` }}>
-                <colgroup>
-                  <col style={{ width: "120px", minWidth: "120px" }} />
-                  {forecastWeeks.map((_, i) => (
-                    <col key={i} style={{ width: "130px", minWidth: "130px" }} />
-                  ))}
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th className="sticky top-0 left-0 z-30 bg-card border-b border-r border-border px-3 py-2.5">
-                      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                        <Users className="size-3" />Driver
-                      </span>
-                    </th>
-                    {forecastWeeks.map((monday, wi) => {
-                      const sunday = new Date(monday)
-                      sunday.setDate(monday.getDate() + 6)
-                      const isCurrentWeek = toDateKey(monday) === toDateKey(getMondayOf(new Date()))
-                      return (
-                        <th
-                          key={wi}
-                          className={`sticky top-0 z-20 border-b border-r border-border px-2.5 py-2 ${isCurrentWeek ? "bg-primary/10" : "bg-card"}`}
-                        >
-                          <div className={`text-[9px] font-bold uppercase tracking-wider mb-0.5 ${isCurrentWeek ? "text-primary" : "text-muted-foreground/60"}`}>
-                            {isCurrentWeek ? "This Week" : `Week ${wi + 1}`}
-                          </div>
-                          <div className={`text-[10px] font-semibold ${isCurrentWeek ? "text-primary" : "text-foreground/80"}`}>
-                            {monday.getDate()} {MONTHS[monday.getMonth()]} – {sunday.getDate()} {MONTHS[sunday.getMonth()]}
-                          </div>
-                        </th>
-                      )
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {orderedResources.map((resource, ri) => (
-                    <tr key={resource.id} className={ri % 2 !== 0 ? "bg-muted/[0.025]" : ""}>
-                      {/* Driver name cell */}
-                      <td className="sticky left-0 z-10 border-b border-r border-border bg-background px-3 py-2.5" style={{ boxShadow: '2px 0 0 0 hsl(var(--border))' }}>
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-foreground truncate">{resource.name}</p>
-                            {resource.role && <p className="text-[9px] text-muted-foreground truncate">{resource.role}</p>}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Week cells */}
-                      {forecastWeeks.map((monday, wi) => {
-                        const weekDays = getWeekDates(monday)
-                        const rs = computeRotationStatus(
-                          resource.id, weekDays, shifts, routes, routeCycle,
-                          staffCycleOffset, routePatternStart, routeEffectiveColorMap
-                        )
-
-                        // Also find the off-day weekday for this week
-                        let offDayName = ""
-                        if (rs && rs.status !== "no_cycle") {
-                          // detect which day is the off day
-                          let patternStart2 = new Date(routePatternStart + "T00:00:00")
-                          const firstKey = toDateKey(weekDays[0])
-                          const ctx2 = detectCycleContext(resource.id, firstKey, shifts, routes, routeCycle)
-                          if (ctx2) {
-                            patternStart2 = new Date(ctx2.patternStart + "T00:00:00")
-                          }
-                          for (const d of weekDays) {
-                            const diff = Math.round((d.getTime() - patternStart2.getTime()) / 86400000)
-                            if (diff >= 0) {
-                              const dayInBlock = (diff % 7 + 7) % 7
-                              if (dayInBlock === 6) {
-                                offDayName = DAYS_SHORT[d.getDay()]
-                                break
-                              }
-                            }
-                          }
-                        }
-
-                        const isCurrentWeek = toDateKey(monday) === toDateKey(getMondayOf(new Date()))
-
-                        if (!rs || rs.status === "no_cycle") {
-                          return (
-                            <td key={wi} className={`border-b border-r border-border px-2.5 py-2 ${isCurrentWeek ? "bg-primary/[0.03]" : ""}`}>
-                              <span className="text-[9px] text-muted-foreground/50 italic">–</span>
-                            </td>
-                          )
-                        }
-
-                        // Actual shifts for this week
-                        const weekKeys = weekDays.map(d => toDateKey(d))
-                        const actualShifts = shifts.filter(s => s.resourceId === resource.id && weekKeys.includes(s.date))
-                        const hasActual = actualShifts.some(s => !OFF_LABELS.has(s.title))
-
-                        const statusDot = {
-                          complete: "bg-emerald-500",
-                          partial:  "bg-amber-500",
-                          missing:  "bg-red-500",
-                          mismatch: "bg-orange-500",
-                        }[rs.status]
-
-                        return (
-                          <td key={wi} className={`border-b border-r border-border px-2 py-2 align-top ${isCurrentWeek ? "bg-primary/[0.03]" : ""}`}>
-                            <div className="flex flex-col gap-1">
-                              {/* Route badge */}
-                              <div
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold truncate max-w-full"
-                                style={{ backgroundColor: rs.expectedRouteColor + "22", color: rs.expectedRouteColor, border: `1px solid ${rs.expectedRouteColor}44` }}
-                                title={rs.expectedRouteName}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: rs.expectedRouteColor }} />
-                                <span className="truncate">{rs.expectedRouteName || "–"}</span>
-                              </div>
-
-                              {/* Off day + completion */}
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {offDayName && (
-                                  <span className="text-[9px] text-muted-foreground bg-muted/50 rounded px-1 py-0.5">Rehat: {offDayName}</span>
-                                )}
-                                {/* Actual status vs expected */}
-                                <div className="flex items-center gap-0.5">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
-                                  {rs.status === "complete" && hasActual && (
-                                    <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">Complete</span>
-                                  )}
-                                  {rs.status === "partial" && (
-                                    <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">{rs.workDaysScheduled}/{rs.workDaysExpected}</span>
-                                  )}
-                                  {rs.status === "missing" && (
-                                    <span className="text-[9px] text-red-600 dark:text-red-400 font-medium">Tiada</span>
-                                  )}
-                                  {rs.status === "mismatch" && (
-                                    <span className="text-[9px] text-orange-600 dark:text-orange-400 font-medium">≠</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Legend */}
-              <div className="flex items-center gap-4 flex-wrap px-4 py-3 border-t border-border/50 bg-muted/10">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Legend:</span>
-                {[
-                  { dot: "bg-emerald-500", label: "Complete" },
-                  { dot: "bg-amber-500",   label: "Partial" },
-                  { dot: "bg-red-500",     label: "No Shift" },
-                  { dot: "bg-orange-500",  label: "Off Rotation" },
-                ].map(({ dot, label }) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <span className={`w-2 h-2 rounded-full ${dot}`} />
-                    <span className="text-[10px] text-muted-foreground">{label}</span>
-                  </div>
-                ))}
-                <span className="text-[10px] text-muted-foreground ml-auto italic">Routes shown based on configured rotation</span>
-              </div>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 

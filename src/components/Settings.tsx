@@ -65,17 +65,14 @@ const MAP_FALLBACK = { lat: "3.0695500", lng: "101.5469179", zoom: "12" }
 // ─── Section panels ───────────────────────────────────────────────────────────
 function SectionHeader({ icon, title, description }: { icon: ReactNode; title: string; description?: string }) {
   return (
-    <div className="mb-8 space-y-3">
-      <div className="flex items-center gap-3">
-        <div className="flex shrink-0 items-center justify-center p-2 rounded-lg text-primary">
-          {icon}
-        </div>
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">{title}</h2>
+    <div className="mb-6">
+      <div className="flex items-center gap-3 mb-1">
+        <span className="size-4 shrink-0 text-primary flex items-center justify-center">{icon}</span>
+        <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
       </div>
       {description && (
-        <p className="text-sm text-muted-foreground leading-relaxed pl-11">{description}</p>
+        <p className="ml-7 text-sm text-muted-foreground leading-relaxed">{description}</p>
       )}
-      <Separator className="mt-4" />
     </div>
   )
 }
@@ -449,12 +446,12 @@ export function Settings({ section = "profile" }: { section?: SectionId }) {
 
         return (
           <div className="space-y-6">
-            <div className="mb-6 sm:mb-7">
-              <div className="mb-2 flex items-center gap-2.5 sm:gap-3">
-                <Palette className="size-3.5 shrink-0 text-primary" />
-                <h2 className="text-[13px] font-semibold tracking-tight text-foreground">Route Card Colours</h2>
+            <div className="mb-6">
+              <div className="flex items-center gap-3 mb-1">
+                <span className="size-4 shrink-0 text-primary flex items-center justify-center"><Palette className="size-4" /></span>
+                <h2 className="text-base font-semibold tracking-tight text-foreground">Route Card Colours</h2>
               </div>
-              <p className="ml-6 text-[11px] leading-relaxed text-muted-foreground/90 sm:ml-7">
+              <p className="ml-7 text-sm text-muted-foreground leading-relaxed">
                 Set a colour for each route. It applies to the route card, map marker, and rooster schedule.
               </p>
             </div>

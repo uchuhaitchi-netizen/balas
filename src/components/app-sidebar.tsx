@@ -19,14 +19,6 @@ import {
   Zap,
 } from "lucide-react"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -112,6 +104,19 @@ export function AppSidebar({
 }) {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [actionOpen, setActionOpen] = React.useState(false)
+  const actionRef = React.useRef<HTMLDivElement>(null)
+  const touchStartYRef = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    if (!actionOpen) return
+    const handler = (e: MouseEvent) => {
+      if (actionRef.current && !actionRef.current.contains(e.target as Node)) {
+        setActionOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [actionOpen])
   const [unsavedDialogOpen, setUnsavedDialogOpen] = React.useState(false)
   const [isEditModeTransitioning, setIsEditModeTransitioning] = React.useState(false)
   const [openItem, setOpenItem] = React.useState<string | null>(
@@ -305,41 +310,42 @@ export function AppSidebar({
           </SidebarContent>
 
           {/* ── Footer ──────────────────────────────────────────────────── */}
-          <SidebarFooter className="px-2 pb-2 pt-1 shrink-0 border-t border-sidebar-border/40">
+          <SidebarFooter className="px-2 pb-2 pt-1 shrink-0">
 
-            {/* Action dropdown */}
-            <DropdownMenu open={actionOpen} onOpenChange={setActionOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="w-full flex items-center gap-2.5 rounded-lg border border-sidebar-border/50 bg-sidebar-accent/20 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-sidebar-accent/40 data-[state=open]:bg-sidebar-accent/50"
-                  data-state={actionOpen ? "open" : "closed"}
-                >
-                  <Zap className="size-[15px] shrink-0 text-amber-400" />
-                  <span className="flex-1 text-[13px] font-medium text-sidebar-foreground">Action</span>
-                  <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="w-(--radix-dropdown-menu-trigger-width) min-w-52 rounded-xl z-[70]"
-                side="top"
-                align="end"
-                sideOffset={6}
+            {/* Action slide-up panel */}
+            <div className="relative" ref={actionRef}>
+              {/* Slide-up panel */}
+              <div
+                className="absolute bottom-full left-0 right-0 mb-2 z-[70] overflow-hidden rounded-xl border border-sidebar-border/60 bg-popover shadow-lg shadow-black/20"
+                style={{
+                  transition: 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.16,1,0.3,1)',
+                  opacity: actionOpen ? 1 : 0,
+                  transform: actionOpen ? 'translateY(0)' : 'translateY(10px)',
+                  pointerEvents: actionOpen ? 'auto' : 'none',
+                }}
+                onTouchStart={e => { touchStartYRef.current = e.touches[0].clientY }}
+                onTouchEnd={e => {
+                  if (touchStartYRef.current === null) return
+                  const delta = e.changedTouches[0].clientY - touchStartYRef.current
+                  touchStartYRef.current = null
+                  if (delta > 50) setActionOpen(false)
+                }}
               >
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-widest text-muted-foreground px-2 py-1.5">
+                <div className="px-3 py-2 text-[10.5px] font-semibold uppercase tracking-widest text-muted-foreground">
                   Quick Actions
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
+                </div>
+                <div className="border-t border-border/50 mx-2" />
 
                 {/* Theme */}
-                <DropdownMenuItem
-                  onSelect={e => { e.preventDefault(); toggleMode() }}
-                  className="flex items-center gap-2 cursor-pointer py-2.5"
+                <button
+                  type="button"
+                  onClick={toggleMode}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/60 transition-colors cursor-pointer"
                 >
                   {mode === "dark"
                     ? <Moon className="size-4 shrink-0 text-indigo-400" />
-                    : <Sun  className="size-4 shrink-0 text-amber-400" />}
-                  <span className="flex-1 text-[12.5px]">
+                    : <Sun className="size-4 shrink-0 text-amber-400" />}
+                  <span className="flex-1 text-[12.5px] text-foreground text-left">
                     {mode === "dark" ? "Dark Mode" : "Light Mode"}
                   </span>
                   <span onClick={e => e.stopPropagation()}>
@@ -350,17 +356,18 @@ export function AppSidebar({
                       onCheckedChange={toggleMode}
                     />
                   </span>
-                </DropdownMenuItem>
+                </button>
 
                 {/* Edit mode */}
-                <DropdownMenuItem
-                  onSelect={e => { e.preventDefault(); handleEditModeToggle() }}
-                  className={`flex items-center gap-2 cursor-pointer py-2.5 ${isEditMode ? "text-primary" : ""}`}
+                <button
+                  type="button"
+                  onClick={handleEditModeToggle}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/60 transition-colors cursor-pointer ${isEditMode ? "text-primary" : ""}`}
                 >
                   {isEditModeTransitioning
                     ? <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
                     : <Pencil className={`size-4 shrink-0 ${isEditMode ? "text-emerald-400" : "text-muted-foreground"}`} />}
-                  <span className="flex-1 text-[12.5px]">
+                  <span className="flex-1 text-[12.5px] text-foreground text-left">
                     {isEditModeTransitioning ? "Switching…" : "Edit Mode"}
                   </span>
                   {!isEditModeTransitioning && (
@@ -373,9 +380,27 @@ export function AppSidebar({
                       />
                     </span>
                   )}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </button>
+              </div>
+
+              {/* Trigger button */}
+              <button
+                type="button"
+                onClick={() => setActionOpen(v => !v)}
+                className="w-full flex items-center gap-2.5 rounded-lg border border-sidebar-border/50 bg-sidebar-accent/20 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-sidebar-accent/40"
+                style={{ background: actionOpen ? 'hsl(var(--sidebar-accent)/0.5)' : undefined }}
+              >
+                <Zap className="size-[15px] shrink-0 text-amber-400" />
+                <span className="flex-1 text-[13px] font-medium text-sidebar-foreground">Action</span>
+                <ChevronsUpDown
+                  className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200"
+                  style={{ transform: actionOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                />
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-sidebar-border/40 mt-1" />
 
             {/* FM Logo */}
             <button
@@ -394,13 +419,6 @@ export function AppSidebar({
         </div>
       </Sidebar>
 
-      {/* Action backdrop */}
-      {actionOpen && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm animate-in fade-in-0 duration-150"
-          onClick={() => setActionOpen(false)}
-        />
-      )}
 
       {/* Unsaved changes dialog */}
       <Dialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>

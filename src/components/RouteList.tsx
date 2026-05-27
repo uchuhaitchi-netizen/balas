@@ -362,8 +362,8 @@ const DELIVERY_ITEMS = [
   { value: 'Daily',     label: 'Daily',     description: 'Delivery every day',          bg: 'bg-emerald-100 dark:bg-emerald-900/40', text: 'text-emerald-700 dark:text-emerald-300', dot: '#10b981' },
   { value: 'Alt 1',    label: 'Alt 1',     description: 'Odd dates (1, 3, 5…)',         bg: 'bg-violet-100 dark:bg-violet-900/40',  text: 'text-violet-700 dark:text-violet-300',  dot: '#8b5cf6' },
   { value: 'Alt 2',    label: 'Alt 2',     description: 'Even dates (2, 4, 6…)',        bg: 'bg-fuchsia-100 dark:bg-fuchsia-900/40',text: 'text-fuchsia-700 dark:text-fuchsia-300',dot: '#d946ef' },
-  { value: 'Weekday',   label: 'Weekday',   description: 'Sun – Thu',                    bg: 'bg-sky-100 dark:bg-sky-900/40',        text: 'text-sky-700 dark:text-sky-300',        dot: '#0ea5e9' },
-  { value: 'Weekday 2', label: 'Weekday',   description: 'Mon – Fri',                    bg: 'bg-blue-100 dark:bg-blue-900/40',      text: 'text-blue-700 dark:text-blue-300',      dot: '#3b82f6' },
+  { value: 'Weekday',   label: 'WD',        description: 'Sun – Thu',                    bg: 'bg-sky-100 dark:bg-sky-900/40',        text: 'text-sky-700 dark:text-sky-300',        dot: '#0ea5e9' },
+  { value: 'Weekday 2', label: 'WE',        description: 'Mon – Fri',                    bg: 'bg-blue-100 dark:bg-blue-900/40',      text: 'text-blue-700 dark:text-blue-300',      dot: '#3b82f6' },
   { value: 'Weekday 3', label: 'WA',        description: 'Sun, Tue & Thu',               bg: 'bg-indigo-100 dark:bg-indigo-900/40',  text: 'text-indigo-700 dark:text-indigo-300',  dot: '#6366f1' },
 ] as const
 const DELIVERY_MAP = new Map<string, typeof DELIVERY_ITEMS[number]>(DELIVERY_ITEMS.map(d => [d.value, d]))
@@ -712,21 +712,38 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
   })
 
   const togglePin = useCallback((route: Route) => {
-    setPinnedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(route.id)) {
-        next.delete(route.id)
-      } else {
-        next.add(route.id)
-      }
-      // Persist full route objects so HomePage can display them
+    try {
+      // Read current stored pinned routes (source of truth)
+      const raw = localStorage.getItem("fcalendar_pinned_routes") || "[]"
+      const stored = JSON.parse(raw) as Array<{ id?: string; name?: string; code?: string; shift?: string }>
+      const ids = new Set(stored.map(item => item.id).filter((id): id is string => Boolean(id)))
+
+      if (ids.has(route.id)) ids.delete(route.id)
+      else ids.add(route.id)
+
       const allPinned = routes
-        .filter(r => next.has(r.id))
+        .filter(r => ids.has(r.id))
         .map(r => ({ id: r.id, name: r.name, code: r.code, shift: r.shift }))
+
       localStorage.setItem("fcalendar_pinned_routes", JSON.stringify(allPinned))
       window.dispatchEvent(new Event("fcalendar_pins_changed"))
-      return next
-    })
+      setPinnedIds(new Set(allPinned.map(p => p.id)))
+    } catch {
+      // Fallback: ensure we at least toggle in-memory
+      setPinnedIds(prev => {
+        const next = new Set(prev)
+        if (next.has(route.id)) next.delete(route.id)
+        else next.add(route.id)
+        try {
+          const allPinned = routes
+            .filter(r => next.has(r.id))
+            .map(r => ({ id: r.id, name: r.name, code: r.code, shift: r.shift }))
+          localStorage.setItem("fcalendar_pinned_routes", JSON.stringify(allPinned))
+          window.dispatchEvent(new Event("fcalendar_pins_changed"))
+        } catch {}
+        return next
+      })
+    }
   }, [routes])
 
   useEffect(() => {
@@ -2263,9 +2280,9 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
         <div className="pointer-events-none absolute inset-0 -z-10" />
         {/* Page header */}
         <div className="mb-6 sm:mb-7">
-          <div className="mb-2 flex items-center gap-2.5 sm:gap-3">
+            <div className="mb-2 flex items-center gap-2.5 sm:gap-3">
             <ClipboardList className="size-3.5 shrink-0 text-primary" />
-            <h2 className="text-[13px] font-semibold tracking-tight text-foreground">{pageTitle}</h2>
+            <h2 className="text-base font-semibold leading-tight text-foreground">{pageTitle}</h2>
           </div>
           <p className="ml-6 text-[11px] leading-relaxed text-muted-foreground/90 sm:ml-7">
             Manage route planning, stops, and delivery updates in one place.
@@ -2571,33 +2588,33 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
                   <div style={{ flex: 1, padding: `${rowGap} ${cardPad} 0`, display: 'flex', flexDirection: 'column', gap: bodyGap, overflowX: 'hidden', overflowY: 'auto', background: cardSectionBg }}>
 
                     {/* Pin + stop count moved outside header */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.9rem', marginTop: '0.65rem', marginBottom: '0.65rem', padding: '0.5rem 0.55rem', borderRadius: 18, background: isDark ? 'hsl(var(--card)/0.55)' : 'hsl(var(--background)/0.88)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginTop: '0.4rem', marginBottom: '0.4rem', padding: '0.3rem 0.4rem', borderRadius: 14, background: isDark ? 'hsl(var(--card)/0.55)' : 'hsl(var(--background)/0.88)' }}>
                       <button
                         onClick={e => { e.stopPropagation(); togglePin(route) }}
                         title={isPinnedCard ? "Unpin from Home" : "Pin to Home"}
                         style={{
                           background: isPinnedCard ? `${markerColor}18` : 'hsl(var(--muted)/0.5)',
                           border: 'none',
-                          borderRadius: 10,
-                          padding: `${rowPadV} ${rowPadH}`,
+                          borderRadius: 8,
+                          padding: '0.18rem 0.35rem',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'pointer', fontSize: '0.85rem', lineHeight: 1,
-                          transition: 'all 0.18s', gap: '0.3rem',
+                          cursor: 'pointer', fontSize: '0.72rem', lineHeight: 1,
+                          transition: 'all 0.18s', gap: '0.2rem',
                         }}
                       >
-                        <span style={{ fontSize: '0.9rem' }}>{isPinnedCard ? '📌' : '📍'}</span>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.1rem' }}>
-                          <span style={{ fontSize: `calc(${(0.73 * Math.min(1, cardW / 340)).toFixed(2)}rem + 1px)`, fontWeight: 700, color: isPinnedCard ? markerColor : 'hsl(var(--muted-foreground))', letterSpacing: '0.03em', lineHeight: 1 }}>
+                        <span style={{ fontSize: '0.72rem' }}>{isPinnedCard ? '📌' : '📍'}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.07rem' }}>
+                          <span style={{ fontSize: `${(0.62 * Math.min(1, cardW / 340)).toFixed(2)}rem`, fontWeight: 700, color: isPinnedCard ? markerColor : 'hsl(var(--muted-foreground))', letterSpacing: '0.03em', lineHeight: 1 }}>
                             {isPinnedCard ? 'Pinned' : 'Pin'}
                           </span>
-                          <span style={{ fontSize: `calc(${(0.57 * Math.min(1, cardW / 340)).toFixed(2)}rem + 1px)`, color: 'hsl(var(--muted-foreground))', opacity: 0.75, lineHeight: 1, whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: `${(0.52 * Math.min(1, cardW / 340)).toFixed(2)}rem`, color: 'hsl(var(--muted-foreground))', opacity: 0.75, lineHeight: 1, whiteSpace: 'nowrap' }}>
                             {isPinnedCard ? 'Tap to unpin' : 'Show on Home'}
                           </span>
                         </div>
                       </button>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
-                        <span style={{ fontSize: `${(1.0 * Math.min(1, cardW / 340)).toFixed(2)}rem`, fontWeight: 900, color: isDark ? '#c0c7d0' : markerColor, lineHeight: 1 }}>{getRouteDeliveryPoints(route).length}</span>
-                        <span style={{ fontSize: `${(0.63 * Math.min(1, cardW / 340)).toFixed(2)}rem`, fontWeight: 700, color: isDark ? '#c0c7d0' : markerColor, opacity: isDark ? 0.85 : 0.6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>stops</span>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
+                        <span style={{ fontSize: `${(0.78 * Math.min(1, cardW / 340)).toFixed(2)}rem`, fontWeight: 900, color: isDark ? '#c0c7d0' : markerColor, lineHeight: 1 }}>{getRouteDeliveryPoints(route).length}</span>
+                        <span style={{ fontSize: `${(0.52 * Math.min(1, cardW / 340)).toFixed(2)}rem`, fontWeight: 700, color: isDark ? '#c0c7d0' : markerColor, opacity: isDark ? 0.85 : 0.6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>stops</span>
                       </div>
                     </div>
 
@@ -2626,19 +2643,6 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
                       )}
                     </div>
 
-                    {/* +N more locations button */}
-                    {getRouteDeliveryPoints(route).length > previewRows && (
-                      <>
-                        <button
-                          onClick={() => openRouteDetail(route.id)}
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem', fontSize: `calc(${badgeFs} + 1px)`, fontWeight: 700, color: isDark ? '#a0aab4' : markerColor, background: 'transparent', border: 'none', borderRadius: 0, padding: 0, cursor: 'pointer', transition: 'color 0.15s', width: '100%' }}
-                          onMouseEnter={e => (e.currentTarget.style.color = isDark ? '#c0c7d0' : markerColor)}
-                          onMouseLeave={e => (e.currentTarget.style.color = isDark ? '#a0aab4' : markerColor)}
-                        >
-                          +{getRouteDeliveryPoints(route).length - previewRows} more locations &nbsp;&rsaquo; view all
-                        </button>
-                      </>
-                    )}
 
                     {/* Divider + delivery type badges */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.55rem', padding: '0.55rem 0', borderTop: `1px solid ${markerColor}1f` }}>
@@ -3156,9 +3160,9 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
                               </div>
                             </div>
                           ) : (
-                          <table className="border-collapse text-[11px] whitespace-nowrap min-w-max w-full text-center [&_th]:text-center [&_td]:text-center">
+                          <table className="border-collapse text-[11px] whitespace-nowrap min-w-max w-full text-center [&_th]:!text-center [&_td]:!text-center [&_th]:align-middle [&_td]:align-middle">
                             <thead className="sticky top-0 z-10 backdrop-blur-sm" style={{ background: 'hsl(var(--background)/0.92)' }}>
-                              <tr>
+                              <tr className="text-center">
                                 {isEditMode && (
                                   <th className="px-4 h-10 text-center w-12 bg-background/95 border-b border-border/70">
                                     <input
@@ -3191,7 +3195,7 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
                             const isEditingThisRow = editingCell?.rowCode === point.code
                             const hasRowPending = [...pendingCellEdits].some(k => k.startsWith(`${point.code}-`))
                             return (
-                              <tr key={point.code} className={`transition-colors duration-100 ${
+                              <tr key={point.code} className={`transition-colors duration-100 text-center ${
                                 isEditingThisRow
                                   ? 'bg-primary/10'
                                   : hasRowPending
