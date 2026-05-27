@@ -1024,6 +1024,11 @@ export function DeliveryTableDialog() {
             </button>
           )}
         </div>
+        {!loading && !error && (
+          <span className="text-[10px] font-semibold text-muted-foreground tabular-nums shrink-0">
+            {displayed.length} / {totalPoints} point(s) · {routes.length} route(s)
+          </span>
+        )}
         <button
           onClick={() => setFilterOpen(true)}
           className={cn(

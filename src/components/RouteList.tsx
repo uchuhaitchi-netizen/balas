@@ -2242,8 +2242,8 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
   const scale      = Math.min(1, cardW / 340)
   const cardPad    = `${(1.25 * scale).toFixed(2)}rem`
   const cardPadV   = `${(1.0  * scale).toFixed(2)}rem`
-  const cardFontLg = `${(1.1  * scale).toFixed(2)}rem`
-  const cardFontSm = `${(0.81 * scale).toFixed(2)}rem`
+  const cardFontLg = `${(0.95 * scale).toFixed(2)}rem`
+  const cardFontSm = `${(0.72 * scale).toFixed(2)}rem`
   const cardFontXs = `${(0.71 * scale).toFixed(2)}rem`
   const rowPadH    = `${(0.65 * scale).toFixed(2)}rem`
   const rowPadV    = `${(0.46 * scale).toFixed(2)}rem`
@@ -2254,6 +2254,7 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
   const btnFs      = `${(0.82 * scale).toFixed(2)}rem`
   const btnPad     = `${(0.6  * scale).toFixed(2)}rem`
   const bodyGap    = `${(0.45 * scale).toFixed(2)}rem`
+  const kmFs       = `${(0.62 * scale).toFixed(2)}rem`
   const editTitleFs = cardFontLg
   const editMetaFs = cardFontXs
   const editLabelFs = cardFontXs
@@ -2628,7 +2629,7 @@ export function RouteList({ variant = 'route-list' }: RouteListProps) {
                             <span style={{ width: iconSz, height: iconSz, borderRadius: 6, background: `linear-gradient(135deg, ${markerColor}dd, ${markerColor}88)`, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: iconFs, fontWeight: 800, flexShrink: 0, boxShadow: `0 1px 3px ${markerColor}22` }}>{i + 1}</span>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'hsl(var(--foreground))', fontWeight: 600, minWidth: 0 }}>{pt.name}</span>
                             {km !== null && (
-                              <span style={{ fontSize: `${cardFontSm}`, fontWeight: 600, color: 'hsl(var(--muted-foreground))', flexShrink: 0 }}>
+                              <span style={{ fontSize: `${kmFs}`, fontWeight: 600, color: 'hsl(var(--muted-foreground))', flexShrink: 0 }}>
                                 {formatKm(km)}
                               </span>
                             )}
